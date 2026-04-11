@@ -1,0 +1,99 @@
+.toolbar {
+  width: 280px;
+  flex-shrink: 0;
+  background: #1e293b;
+  border-right: 1px solid #334155;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.step-hint {
+  background: #0f172a;
+  border-left: 3px solid #38bdf8;
+  border-radius: 4px;
+  padding: 10px 12px;
+  font-size: 0.87rem;
+  line-height: 1.5;
+  color: #94a3b8;
+}
+.hint-error { border-color: #ef4444; }
+
+.error-box {
+  background: #450a0a;
+  border: 1px solid #ef4444;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  color: #fca5a5;
+  word-break: break-word;
+}
+
+.slider-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.slider-labels {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.slider-label-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+}
+
+.slider-value {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #38bdf8;
+}
+
+.dam-height-badge {
+  font-size: 0.78rem;
+  color: #7dd3fc;
+  background: #0c4a6e;
+  border-radius: 4px;
+  padding: 3px 8px;
+  text-align: center;
+}
+
+.water-slider {
+  width: 100%;
+  accent-color: #38bdf8;
+  cursor: pointer;
+  height: 6px;
+}
+
+.slider-endpoints {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: #475569;
+}
+
+.elev-info {
+  font-size: 0.8rem;
+  color: #64748b;
+}
+.elev-info strong { color: #94a3b8; }
+
+.computing-badge {
+  font-size: 0.8rem;
+  color: #fbbf24;
+  text-align: center;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}

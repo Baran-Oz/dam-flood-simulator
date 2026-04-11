@@ -1,0 +1,79 @@
+.stats-panel {
+  width: 220px;
+  flex-shrink: 0;
+  background: #1e293b;
+  border-left: 1px solid #334155;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.stats-empty {
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  color: #475569;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.stats-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #475569;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #334155;
+}
+
+.stat-card {
+  background: #0f172a;
+  border-radius: 8px;
+  padding: 10px 12px;
+  border: 1px solid #1e3a5f;
+}
+
+.stat-label {
+  font-size: 0.73rem;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 4px;
+}
+
+.stat-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  transition: opacity 0.2s;
+}
+
+.stat-loading {
+  opacity: 0.4;
+}
+
+.stat-blue  { color: #38bdf8; }
+.stat-amber { color: #fbbf24; }
+
+.boundary-warning {
+  font-size: 0.78rem;
+  color: #fde68a;
+  line-height: 1.5;
+  padding: 8px 10px;
+  background: #451a03;
+  border-radius: 6px;
+  border: 1px solid #d97706;
+}
+
+.no-flood-note {
+  font-size: 0.78rem;
+  color: #64748b;
+  line-height: 1.5;
+  padding: 8px;
+  background: #0f172a;
+  border-radius: 6px;
+  border: 1px solid #334155;
+}
