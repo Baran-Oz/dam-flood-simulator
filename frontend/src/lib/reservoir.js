@@ -152,34 +152,50 @@ function faceCells(grid, mask, cells, damPx, sign) {
 }
 
 /**
- * Guess which side of the dam is upstream by following the river. Water released
- * just above the riverbed along the downstream face runs down the valley and soon
- * finds ground lower than the riverbed at the dam. On the upstream side the bed
- * rises, so it never does. Comparing the lowest ground each side reaches is
- * robust to winding gorges, where "straight out from the dam" is meaningless.
+ * Guess which side of the dam is upstream by following the river. From each face,
+ * a priority flood always explores the lowest cell next, so it traces the
+ * riverbed. Downstream the bed keeps falling, and within a few hundred thousand
+ * cells the trace is far below the riverbed at the dam. Upstream the bed rises,
+ * so the trace has to climb and its lowest point stays near the dam.
+ *
+ * Following the lowest path matters on big, gently sloping rivers (~0.5 m/km):
+ * spreading out evenly covers only a few kilometres, where DEM noise of a few
+ * metres outweighs the slope.
+ * The trace is capped at the crest. The dam's ends reach above it (that is what
+ * the tie-in ensures), so the trace can't walk round an end onto the other side.
  * Returns +1 (along the dam normal) or -1.
  */
-function guessUpstreamSide(grid, mask, faces, base) {
-  const lowest = sign => {
-    const seeds = [...faces[sign]].filter(i => grid.data[i] < base + 10)
-    return seeds.length ? lowestReachable(grid, mask, seeds, base + 10, 60000) : Infinity
+function guessUpstreamSide(grid, mask, faces, base, crest) {
+  const lowest = (sign, level) => {
+    const seeds = [...faces[sign]].filter(i => grid.data[i] < level)
+    return seeds.length ? lowestAlongValley(grid, mask, seeds, level, 200000) : Infinity
   }
-  return lowest(-1) > lowest(1) ? -1 : 1
+  // A tie means both traces met, e.g. round an end of an axis that stops below
+  // the crest; retry lower, closer to the riverbed.
+  for (const level of [Math.max(crest, base + 3), base + 10, base + 3]) {
+    const minus = lowest(-1, level), plus = lowest(1, level)
+    if (Math.abs(minus - plus) > 0.01) return minus > plus ? -1 : 1
+  }
+  return 1
 }
 
-/** Lowest ground reachable from the seeds through cells below `level`, exploring at most maxCells. */
-function lowestReachable(grid, mask, seeds, level, maxCells) {
+/**
+ * Lowest ground reached by a priority flood (lowest cell first) from the seeds,
+ * through non-dam cells below `level`, visiting at most maxCells.
+ */
+export function lowestAlongValley(grid, mask, seeds, level, maxCells) {
   const { data, width, height } = grid
   const seen = new Uint8Array(width * height)
-  const queue = new Int32Array(Math.max(maxCells, seeds.length))
-  let head = 0, tail = 0, lowest = Infinity
+  const heap = new MinHeap(maxCells * 4 + seeds.length)
   for (const s of seeds) {
     if (seen[s]) continue
     seen[s] = 1
-    queue[tail++] = s
+    heap.push(s, data[s])
   }
-  while (head < tail) {
-    const idx = queue[head++]
+  let lowest = Infinity, visited = 0
+  while (heap.size && visited < maxCells) {
+    const idx = heap.pop()
+    visited++
     const e = data[idx]
     if (e < lowest) lowest = e
     const r = (idx / width) | 0
@@ -192,9 +208,49 @@ function lowestReachable(grid, mask, seeds, level, maxCells) {
   return lowest
 
   function visit(j) {
-    if (tail >= maxCells || seen[j] || mask[j] || !(data[j] < level)) return
+    if (seen[j] || mask[j] || !(data[j] < level)) return
     seen[j] = 1
-    queue[tail++] = j
+    if (heap.size < heap.capacity) heap.push(j, data[j])
+  }
+}
+
+/** Binary min-heap of cell indices keyed by elevation. */
+class MinHeap {
+  constructor(capacity) {
+    this.capacity = capacity
+    this.keys = new Float32Array(capacity)
+    this.vals = new Int32Array(capacity)
+    this.size = 0
+  }
+  push(val, key) {
+    let i = this.size++
+    const { keys, vals } = this
+    while (i > 0) {
+      const p = (i - 1) >> 1
+      if (keys[p] <= key) break
+      keys[i] = keys[p]; vals[i] = vals[p]
+      i = p
+    }
+    keys[i] = key; vals[i] = val
+  }
+  pop() {
+    const { keys, vals } = this
+    const top = vals[0]
+    const n = --this.size
+    if (n > 0) {
+      const key = keys[n], val = vals[n]
+      let i = 0
+      for (;;) {
+        let m = 2 * i + 1
+        if (m >= n) break
+        if (m + 1 < n && keys[m + 1] < keys[m]) m++
+        if (keys[m] >= key) break
+        keys[i] = keys[m]; vals[i] = vals[m]
+        i = m
+      }
+      keys[i] = key; vals[i] = val
+    }
+    return top
   }
 }
 
@@ -274,9 +330,9 @@ export function simulateReservoir(grid, damPx, heightM, side = 'auto', opts = {}
     if (faces[-1].has(i)) { faces[1].delete(i); faces[-1].delete(i) }
   }
 
-  const autoSide = guessUpstreamSide(grid, mask, faces, base)
-  const upSide = side === 1 || side === -1 ? side : autoSide
   const crest = base + heightM
+  const autoSide = guessUpstreamSide(grid, mask, faces, base, crest)
+  const upSide = side === 1 || side === -1 ? side : autoSide
   const { data, width, height } = grid
 
   const seeds = [...faces[upSide]].filter(i => data[i] < crest)

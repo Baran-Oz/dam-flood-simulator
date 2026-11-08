@@ -80,6 +80,25 @@ describe('simulateReservoir', () => {
     expect(sim.volume_m3).toBeCloseTo(expected(155).volume, 0)
   })
 
+  it('finds upstream on a gently sloping river with noisy terrain', () => {
+    // 0.02 m/cell river slope (like 0.6 m/km at 30 m cells) plus ±3 m noise:
+    // a few metres of noise near the dam outweigh the slope, but the downstream
+    // trace along the riverbed falls far below the dam within the grid.
+    const w = 400, h = 1200
+    let seed = 7
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647 - 0.5) * 6
+    const data = new Float32Array(w * h)
+    for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+      data[r * w + c] = 100 + 0.5 * Math.abs(c - 200) + 0.02 * (h - r) + rnd()
+    }
+    const grid = { data, width: w, height: h, z: Z, x0: GX, y0: GY }
+    const damRow = 600
+    const dam = [[GX + 120.5, GY + damRow + 0.5], [GX + 280.5, GY + damRow + 0.5]]
+    const sim = simulateReservoir(grid, dam, 20)
+    expect(sim.autoSide).toBe(-1) // north = upstream (ground rises with smaller r)
+    expect(sim.leak).toBe(false)
+  })
+
   it('flags a leak when the dam does not reach high enough ground, and finds the sealing height', () => {
     // Dam ends at columns 80 and 120. To get around an end the water must pass
     // (149, 121) at 146.5 m, so it seals up to a crest of 146.5 m = 21.5 m height.
