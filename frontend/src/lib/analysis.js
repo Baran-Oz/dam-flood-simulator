@@ -75,6 +75,7 @@ export async function buildGrid(z, b, loadTile) {
  * @param params.dam     [[lon, lat], ...] dam axis
  * @param params.height  dam height above riverbed (m)
  * @param params.side    'auto' | 1 | -1
+ * @param params.startZoom finest zoom to try first (default START_ZOOM; finer data can use more)
  * @param params.tieIn   extend the axis ends into ground above the crest (default true)
  * @param params.region  optional { z, bounds, base } from a previous run with the same dam
  * @param deps.loadTile  (z, x, y) => Promise<Float32Array>
@@ -83,10 +84,10 @@ export async function buildGrid(z, b, loadTile) {
  * @returns null if cancelled, otherwise { grid, sim, result }
  */
 export async function analyzeReservoir(params, deps) {
-  const { dam, height, side = 'auto', region, tieIn = true } = params
+  const { dam, height, side = 'auto', region, tieIn = true, startZoom = START_ZOOM } = params
   const { loadTile, onProgress = () => {}, isCancelled = () => false } = deps
 
-  let z = region?.z ?? START_ZOOM
+  let z = region?.z ?? startZoom
   let b = region?.bounds ?? damBounds(dam, z, PAD_TILES)
   // Riverbed elevation comes from the finest grid and is then held fixed
   let base = region?.base ?? null

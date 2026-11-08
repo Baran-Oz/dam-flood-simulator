@@ -353,3 +353,99 @@
   margin-top: 2px;
   accent-color: var(--color-primary);
 }
+
+/* ---- Terrain dataset picker ---- */
+.select {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--color-text);
+  font: 600 0.82rem/1.2 inherit;
+  font-family: inherit;
+}
+
+.select option,
+.select optgroup {
+  background: #0f172a;
+  color: var(--color-text);
+}
+
+.sourceInfo {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.sourceInfo dt {
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.sourceInfo dd {
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.keyForm,
+.keyRow {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(251, 191, 36, 0.06);
+  border: 1px solid rgba(251, 191, 36, 0.22);
+}
+
+.keyRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: rgba(52, 211, 153, 0.06);
+  border-color: rgba(52, 211, 153, 0.22);
+}
+
+.keyLabel {
+  display: block;
+  font-size: 0.76rem;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.keyInputRow {
+  display: flex;
+  gap: 6px;
+}
+
+.keyInput {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--color-text);
+  font-family: ui-monospace, monospace;
+  font-size: 0.78rem;
+}
+
+.keyInput:focus-visible,
+.select:focus-visible {
+  outline: 2px solid var(--color-primary-light);
+  outline-offset: 2px;
+}
+
+.anchor {
+  color: var(--color-primary-light);
+}
+
+.secondary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

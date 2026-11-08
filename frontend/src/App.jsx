@@ -2,11 +2,23 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import MapView from './components/MapView'
 import SidePanel from './components/SidePanel'
 import { analyzeReservoir } from './lib/analysis'
-import { createTileLoader } from './lib/terrain'
 import { renderFloodOverlay } from './lib/overlay'
+import { sourceById, DEFAULT_SOURCE, loadKeys, saveKeys } from './lib/sources'
 import styles from './App.module.css'
 
-const loadTile = createTileLoader()
+const SOURCE_STORE = 'baraj.source'
+const readStored = (k, fallback) => { try { return localStorage.getItem(k) || fallback } catch { return fallback } }
+const writeStored = (k, v) => { try { localStorage.setItem(k, v) } catch { /* ignore */ } }
+
+// One tile loader (with its own cache) per dataset + key
+const loaders = new Map()
+function loaderFor(source, keys) {
+  const key = source.keyProvider ? keys[source.keyProvider] : ''
+  const id = `${source.id}|${key}`
+  if (!loaders.has(id)) loaders.set(id, source.create(keys))
+  return loaders.get(id)
+}
+
 const LAYERS = [
   { id: 'street', label: 'Street' },
   { id: 'topo', label: 'Topo' },
@@ -26,24 +38,38 @@ export default function App() {
   const [error, setError] = useState(null)
   const [layer, setLayer] = useState('topo')
   const [collapsed, setCollapsed] = useState(false)
+  const [sourceId, setSourceId] = useState(() => sourceById(readStored(SOURCE_STORE, DEFAULT_SOURCE)).id)
+  const [keys, setKeys] = useState(loadKeys)
+
+  const source = sourceById(sourceId)
+  const sourceKey = source.keyProvider ? keys[source.keyProvider] || '' : ''
+  const needsKey = !!source.keyProvider && !sourceKey
 
   const runId = useRef(0)
-  const regionHint = useRef(null) // { dam, height, region } from the last run
+  const regionHint = useRef(null) // { dam, height, sourceId, region } from the last run
 
-  // Re-run the analysis whenever the dam, its height or the upstream side changes
+  // Re-run the analysis whenever the dam, its settings or the dataset change
   useEffect(() => {
     if (!dam || !(height > 0)) return
+    if (needsKey) {
+      runId.current++
+      setResult(null)
+      setOverlay(null)
+      setBusy(false)
+      return
+    }
     const id = ++runId.current
     const timer = setTimeout(async () => {
       setBusy(true)
       setError(null)
       const hint = regionHint.current
-      const region = hint && hint.dam === dam && height >= hint.height ? hint.region : undefined
+      const region =
+        hint && hint.dam === dam && hint.sourceId === source.id && height >= hint.height ? hint.region : undefined
       try {
         const out = await analyzeReservoir(
-          { dam, height, side, region, tieIn },
+          { dam, height, side, region, tieIn, startZoom: source.startZoom },
           {
-            loadTile,
+            loadTile: loaderFor(source, keys),
             onProgress: msg => id === runId.current && setProgress(msg),
             isCancelled: () => id !== runId.current,
           },
@@ -54,7 +80,7 @@ export default function App() {
           if (img) URL.revokeObjectURL(img.url)
           return
         }
-        regionHint.current = { dam, height, region: out.result.region }
+        regionHint.current = { dam, height, sourceId: source.id, region: out.result.region }
         setResult(out.result)
         setOverlay(img)
       } catch (e) {
@@ -64,7 +90,22 @@ export default function App() {
       }
     }, 300)
     return () => clearTimeout(timer)
-  }, [dam, height, side, tieIn])
+  }, [dam, height, side, tieIn, sourceId, sourceKey]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const changeSource = id => {
+    setSourceId(id)
+    writeStored(SOURCE_STORE, id)
+  }
+
+  const saveKey = (provider, value) => {
+    setKeys(k => {
+      const next = { ...k }
+      if (value) next[provider] = value
+      else delete next[provider]
+      saveKeys(next)
+      return next
+    })
+  }
 
   // Release the previous overlay image when it is replaced
   useEffect(() => () => overlay && URL.revokeObjectURL(overlay.url), [overlay])
@@ -152,6 +193,11 @@ export default function App() {
             side={side}
             tieIn={tieIn}
             onTieInChange={setTieIn}
+            sourceId={source.id}
+            keys={keys}
+            needsKey={needsKey}
+            onSourceChange={changeSource}
+            onSaveKey={saveKey}
             busy={busy}
             progress={progress}
             result={result}

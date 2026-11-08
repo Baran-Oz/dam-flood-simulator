@@ -1,8 +1,11 @@
 import { polylineLength } from '../lib/geo'
 import DamProfile from './DamProfile'
+import TerrainPicker from './TerrainPicker'
+import { sourceById } from '../lib/sources'
 import styles from './SidePanel.module.css'
 
-const fmtNum = (v, d = 0) => v.toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d })
+const fmtNum = (v, d = 0) =>
+  Number.isFinite(v) ? v.toLocaleString('en-US', { maximumFractionDigits: d, minimumFractionDigits: d }) : '—'
 
 function fmtArea(m2) {
   const km2 = m2 / 1e6
@@ -21,6 +24,7 @@ const fmtLen = m => (m >= 1000 ? `${fmtNum(m / 1000, 2)} km` : `${fmtNum(m, 0)} 
 
 export default function SidePanel({
   dam, drawing, height, side, tieIn, busy, progress, result, error,
+  sourceId, keys, needsKey, onSourceChange, onSaveKey,
   onStartDrawing, onCancelDrawing, onHeightChange, onFlipSide, onAutoSide, onTieInChange,
 }) {
   const damLength = dam ? polylineLength(dam) : 0
@@ -88,18 +92,28 @@ export default function SidePanel({
         </label>
       </section>
 
-      {/* ---------- 3. Results ---------- */}
+      {/* ---------- 3. Terrain data ---------- */}
+      <section className={styles.section}>
+        <h2 className={styles.heading}><span className={styles.num}>3</span>Terrain data</h2>
+        <TerrainPicker sourceId={sourceId} keys={keys} onSourceChange={onSourceChange} onSaveKey={onSaveKey} />
+      </section>
+
+      {/* ---------- 4. Results ---------- */}
       {dam && (
         <section className={styles.section}>
           <h2 className={styles.heading}>
-            <span className={styles.num}>3</span>Reservoir
+            <span className={styles.num}>4</span>Reservoir
             {busy && <span className={styles.spinner} aria-label="Computing" />}
           </h2>
 
+          {needsKey && (
+            <div className={styles.callout}>Add an API key for this dataset (section 3) to run the analysis.</div>
+          )}
           {busy && !result && <p className={styles.progress}>{progress || 'Starting…'}</p>}
+          {busy && result && <p className={styles.progress}>{progress}</p>}
           {error && <div className={`${styles.callout} ${styles.danger}`}>{error}</div>}
 
-          {result && (
+          {result && !needsKey && (
             <div className={busy ? styles.stale : ''}>
               {ok && !result.leak && (
                 <div className={styles.headline}>
@@ -108,7 +122,7 @@ export default function SidePanel({
                 </div>
               )}
 
-              <dl className={styles.facts}>
+              {result.status !== 'nodata' && <dl className={styles.facts}>
                 <Fact k="Crest / water level" v={`${fmtNum(result.crest, 1)} m`} />
                 {result.crestLength - result.damLength > 1 && (
                   <Fact k="Crest length (with extensions)" v={fmtLen(result.crestLength)} />
@@ -117,7 +131,7 @@ export default function SidePanel({
                 {ok && !result.leak && <Fact k="Max depth" v={`${fmtNum(result.maxDepth, 1)} m`} />}
                 {ok && !result.leak && <Fact k="Mean depth" v={`${fmtNum(result.meanDepth, 1)} m`} />}
                 <Fact k="Terrain resolution" v={`~${fmtNum(result.resolution, 0)} m`} />
-              </dl>
+              </dl>}
 
               <Warnings result={result} />
 
@@ -140,8 +154,8 @@ export default function SidePanel({
       )}
 
       <footer className={styles.footer}>
-        Terrain: AWS Terrain Tiles (SRTM ~30 m). Elevations are of the ground surface at the
-        time of survey, so existing lakes count as land. Results are a first-order estimate.
+        Terrain: {sourceById(sourceId).attribution}. Elevations are of the surface at the time of
+        survey, so lakes that already existed then count as land. Results are a first-order estimate.
       </footer>
     </aside>
   )
@@ -175,7 +189,11 @@ function endsReachHighGround({ profile, crest }) {
 
 function Warnings({ result }) {
   if (result.status === 'nodata') {
-    return <div className={`${styles.callout} ${styles.danger}`}>No terrain data under the dam axis.</div>
+    return (
+      <div className={`${styles.callout} ${styles.danger}`}>
+        This dataset has no terrain data under the dam axis. Check its coverage, or pick another dataset.
+      </div>
+    )
   }
   if (result.status === 'dry') {
     return (
