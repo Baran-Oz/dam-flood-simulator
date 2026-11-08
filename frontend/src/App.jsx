@@ -1,177 +1,180 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import MapView from './components/MapView'
-import StatsPanel from './components/StatsPanel'
-import Toolbar from './components/Toolbar'
-import { fetchDEM, elevationRange, sampleElevation } from './lib/demTiles'
-import { simulate } from './lib/floodSim'
-import './App.css'
+import SidePanel from './components/SidePanel'
+import { analyzeReservoir } from './lib/analysis'
+import { createTileLoader } from './lib/terrain'
+import { renderFloodOverlay } from './lib/overlay'
+import styles from './App.module.css'
 
-/**
- * Workflow steps:
- *  idle     – waiting for user to draw dam wall
- *  seed     – dam drawn; waiting for seed click on reservoir side
- *  fetching – downloading DEM tiles
- *  ready    – DEM loaded; simulation running on slider change
- *  error    – something went wrong
- */
+const loadTile = createTileLoader()
+const LAYERS = [
+  { id: 'street', label: 'Street' },
+  { id: 'topo', label: 'Topo' },
+  { id: 'satellite', label: 'Satellite' },
+]
 
 export default function App() {
-  const [step,       setStep]       = useState('idle')
-  const [damCoords,  setDamCoords]  = useState(null)
-  const [seedPoint,  setSeedPoint]  = useState(null)
-  const [dem,        setDem]        = useState(null)
-  const [elevRange,  setElevRange]  = useState({ min: 0, max: 100 })
-  const [waterLevel, setWaterLevel] = useState(0)
-  const [simResult,  setSimResult]  = useState(null)
-  const [loading,    setLoading]    = useState(false)
-  const [error,      setError]      = useState(null)
-  const [damCrest,   setDamCrest]   = useState(null)
+  const [dam, setDam] = useState(null)            // [[lon, lat], ...]
+  const [drawing, setDrawing] = useState(false)
+  const [height, setHeight] = useState(60)        // m above riverbed
+  const [side, setSide] = useState('auto')        // 'auto' | 1 | -1
+  const [tieIn, setTieIn] = useState(true)        // extend axis ends into high ground
+  const [busy, setBusy] = useState(false)
+  const [progress, setProgress] = useState('')
+  const [result, setResult] = useState(null)
+  const [overlay, setOverlay] = useState(null)
+  const [error, setError] = useState(null)
+  const [layer, setLayer] = useState('topo')
+  const [collapsed, setCollapsed] = useState(false)
 
-  const debounceRef = useRef(null)
+  const runId = useRef(0)
+  const regionHint = useRef(null) // { dam, height, region } from the last run
 
-  // -------------------------------------------------------------------
-  // Step 1: dam wall drawn on map
-  // -------------------------------------------------------------------
-  const handleDamDrawn = useCallback((coords) => {
-    setDamCoords(coords)
-    setSimResult(null)
-    setStep('seed')
-  }, [])
-
-  // -------------------------------------------------------------------
-  // Step 2: user clicks seed point → fetch DEM
-  // -------------------------------------------------------------------
-  const handleSeedPlaced = useCallback(async (lnglat) => {
-    if (!damCoords) return
-    setSeedPoint(lnglat)
-    setStep('fetching')
-    setLoading(true)
-    setError(null)
-
-    // Bounding box: convex hull of dam + seed + generous padding.
-    // 0.5° ≈ 40–55 km, enough to capture a typical reservoir upstream valley.
-    // chooseZoom() in demTiles.js will automatically pick a coarser resolution
-    // (zoom 11, ~80 m/px) for areas this large, keeping tile count manageable.
-    const allLon = [...damCoords.map(c => c[0]), lnglat[0]]
-    const allLat = [...damCoords.map(c => c[1]), lnglat[1]]
-    const pad  = 0.5
-    const bbox = {
-      west:  Math.max(-180, Math.min(...allLon) - pad),
-      east:  Math.min( 180, Math.max(...allLon) + pad),
-      south: Math.max( -90, Math.min(...allLat) - pad),
-      north: Math.min(  90, Math.max(...allLat) + pad),
-    }
-
-    try {
-      const demData = await fetchDEM(bbox.west, bbox.south, bbox.east, bbox.north)
-      const range   = elevationRange(demData)
-      setDem(demData)
-      setElevRange(range)
-
-      // Default water level: dam base + 10 m (or midpoint of range)
-      const midIdx      = Math.floor(damCoords.length / 2)
-      const damBaseElev = sampleElevation(demData, damCoords[midIdx][0], damCoords[midIdx][1])
-      const defaultLevel = isNaN(damBaseElev)
-        ? range.min + (range.max - range.min) * 0.2
-        : Math.min(damBaseElev + 10, range.max)
-
-      setWaterLevel(defaultLevel)
-      setStep('ready')
-
-      // Hand loading control to runSim — it will set loading=false after the sim
-      runSim(demData, damCoords, defaultLevel, lnglat)
-    } catch (e) {
-      setError(e.message)
-      setStep('error')
-      setLoading(false)   // only on error; success path lets runSim own loading state
-    }
-  }, [damCoords])  // eslint-disable-line react-hooks/exhaustive-deps
-
-  // -------------------------------------------------------------------
-  // Simulation
-  // -------------------------------------------------------------------
-  const runSim = useCallback((demArg, damArg, level, seedArg) => {
-    const useDem  = demArg  ?? dem
-    const useDam  = damArg  ?? damCoords
-    const useSeed = seedArg ?? seedPoint
-    if (!useDem || !useDam || !useSeed) return
-
-    setLoading(true)
-    // Run on the next tick so the UI can re-render the loading state first
-    setTimeout(() => {
+  // Re-run the analysis whenever the dam, its height or the upstream side changes
+  useEffect(() => {
+    if (!dam || !(height > 0)) return
+    const id = ++runId.current
+    const timer = setTimeout(async () => {
+      setBusy(true)
+      setError(null)
+      const hint = regionHint.current
+      const region = hint && hint.dam === dam && height >= hint.height ? hint.region : undefined
       try {
-        const result = simulate(useDem, useDam, level, useSeed[0], useSeed[1])
-        setSimResult({
-          imageDataURL:  result.imageDataURL,
-          bounds:        useDem.bounds,
-          area_km2:      result.area_km2,
-          volume_m3:     result.volume_m3,
-          hitsBoundary:  result.hitsBoundary,
-        })
-        setDamCrest(result.damCrestElev)
-        setError(null)
+        const out = await analyzeReservoir(
+          { dam, height, side, region, tieIn },
+          {
+            loadTile,
+            onProgress: msg => id === runId.current && setProgress(msg),
+            isCancelled: () => id !== runId.current,
+          },
+        )
+        if (!out || id !== runId.current) return
+        const img = await renderFloodOverlay(out.grid, out.sim)
+        if (id !== runId.current) {
+          if (img) URL.revokeObjectURL(img.url)
+          return
+        }
+        regionHint.current = { dam, height, region: out.result.region }
+        setResult(out.result)
+        setOverlay(img)
       } catch (e) {
-        setError(e.message)
+        if (id === runId.current) setError(e.message || String(e))
       } finally {
-        setLoading(false)
+        if (id === runId.current) setBusy(false)
       }
-    }, 0)
-  }, [dem, damCoords, seedPoint])
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [dam, height, side, tieIn])
 
-  // Debounced slider handler (150 ms)
-  const handleWaterLevelChange = useCallback((level) => {
-    setWaterLevel(level)
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => runSim(null, null, level, null), 150)
-  }, [runSim])
+  // Release the previous overlay image when it is replaced
+  useEffect(() => () => overlay && URL.revokeObjectURL(overlay.url), [overlay])
 
-  // -------------------------------------------------------------------
-  // Reset
-  // -------------------------------------------------------------------
-  const handleReset = useCallback(() => {
-    setStep('idle')
-    setDamCoords(null)
-    setSeedPoint(null)
-    setDem(null)
-    setSimResult(null)
+  const clearResults = () => {
+    runId.current++
+    setResult(null)
+    setOverlay(null)
     setError(null)
-    setWaterLevel(0)
-    setDamCrest(null)
+    setBusy(false)
+  }
+
+  const handleDamDrawn = useCallback(coords => {
+    clearResults()
+    setDrawing(false)
+    setSide('auto')
+    setDam(coords)
   }, [])
+
+  const startDrawing = () => {
+    clearResults()
+    setDam(null)
+    setDrawing(true)
+  }
+
+  const reset = () => {
+    clearResults()
+    setDam(null)
+    setDrawing(false)
+    setSide('auto')
+  }
+
+  const flipSide = () => result && setSide(-result.side)
 
   return (
-    <div className="app-layout">
-      <header className="app-header">
-        <span className="app-title">Dam Flood Simulator</span>
-        {step !== 'idle' && (
-          <button className="btn-reset" onClick={handleReset}>Reset</button>
-        )}
+    <div className={styles['app-layout']}>
+      <header className={styles['app-header']}>
+        <div className={styles['header-left']}>
+          <svg className={styles['app-logo']} viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 20h18M5 20V9l4-2v13M9 20V7l10 3v10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+            <path d="M11 14c1.5-1 3-1 4.5 0s3 1 3.5.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+          <div className={styles['header-titles']}>
+            <span className={styles['app-title']}>Dam Flood Simulator</span>
+            <span className={styles['app-subtitle']}>Reservoir inundation from terrain</span>
+          </div>
+        </div>
+
+        <div className={styles['header-center']}>
+          <div className={styles['layer-toggle']} role="group" aria-label="Basemap">
+            {LAYERS.map(l => (
+              <button
+                key={l.id}
+                className={`${styles['toggle-btn']} ${layer === l.id ? styles['toggle-active'] : ''}`}
+                onClick={() => setLayer(l.id)}
+                aria-pressed={layer === l.id}
+              >
+                {l.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className={styles['header-right']}>
+          {(dam || drawing) && (
+            <button className={styles['btn-reset']} onClick={reset}>Reset</button>
+          )}
+          <button
+            className={styles['btn-panel-toggle']}
+            onClick={() => setCollapsed(c => !c)}
+            title={collapsed ? 'Show panel' : 'Hide panel'}
+            aria-label={collapsed ? 'Show panel' : 'Hide panel'}
+          >
+            {collapsed ? '☰' : '✕'}
+          </button>
+        </div>
       </header>
 
-      <div className="app-body">
-        <Toolbar
-          step={step}
-          loading={loading}
-          error={error}
-          elevRange={elevRange}
-          waterLevel={waterLevel}
-          damCrest={damCrest}
-          onWaterLevelChange={handleWaterLevelChange}
-        />
+      <div className={styles['app-body']}>
+        {!collapsed && (
+          <SidePanel
+            dam={dam}
+            drawing={drawing}
+            height={height}
+            side={side}
+            tieIn={tieIn}
+            onTieInChange={setTieIn}
+            busy={busy}
+            progress={progress}
+            result={result}
+            error={error}
+            onStartDrawing={startDrawing}
+            onCancelDrawing={() => setDrawing(false)}
+            onHeightChange={setHeight}
+            onFlipSide={flipSide}
+            onAutoSide={() => setSide('auto')}
+          />
+        )}
 
         <MapView
-          step={step}
-          simResult={simResult}
+          dam={dam}
+          drawing={drawing}
           onDamDrawn={handleDamDrawn}
-          onSeedPlaced={handleSeedPlaced}
-        />
-
-        <StatsPanel
-          step={step}
-          loading={loading}
-          simResult={simResult}
-          waterLevel={waterLevel}
-          damCrest={damCrest}
+          onDrawCancelled={() => setDrawing(false)}
+          overlay={overlay}
+          upstreamPoint={result?.upstreamPoint}
+          axis={result?.axis}
+          gridBounds={result?.edgeLimited ? result.gridBounds : null}
+          leak={!!result?.leak}
+          layer={layer}
         />
       </div>
     </div>

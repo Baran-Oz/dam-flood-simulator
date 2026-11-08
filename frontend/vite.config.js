@@ -3,17 +3,14 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  // Pre-bundle UMD libraries so their CommonJS require() calls resolve correctly
+  // Pre-bundle the UMD Leaflet libraries so leaflet-draw can find the global L
   optimizeDeps: {
     include: ['leaflet', 'leaflet-draw'],
   },
-  server: {
-    port: 5173,
-    proxy: {
-      '/api': {
-        target: 'http://localhost:8000',
-        changeOrigin: true,
-      },
-    },
+  server: { port: 5173 },
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: './src/setupTests.js',
   },
 })
