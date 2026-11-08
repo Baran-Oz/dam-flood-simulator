@@ -17,15 +17,139 @@
   animation: slide-in-left 0.4s var(--ease-out-expo) both;
 }
 
-@media (max-width: 640px) {
-  .panel {
-    left: 8px;
-    right: 8px;
-    top: auto;
-    width: auto;
-    max-height: 55vh;
-  }
+/* ---- Phone: bottom sheet ---- */
+.sheet {
+  top: auto;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: auto;
+  max-height: 72vh;
+  max-height: 72dvh;
+  border-radius: 18px 18px 0 0;
+  border-bottom: none;
+  padding-bottom: env(safe-area-inset-bottom);
+  overscroll-behavior: contain;
+  animation: sheet-up 0.35s var(--ease-out-expo) both;
 }
+
+.peek {
+  overflow: visible;
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(24px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+.handle {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 8px 0 6px;
+  border: none;
+  background: rgba(15, 23, 42, 0.96);
+  color: var(--color-text-muted);
+  font: 600 0.68rem/1 inherit;
+  font-family: inherit;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.grip {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.handle:focus-visible {
+  outline: 2px solid var(--color-primary-light);
+  outline-offset: -2px;
+}
+
+.peekBody {
+  padding: 4px 16px 14px;
+}
+
+.peekBody .hint {
+  margin-bottom: 10px;
+}
+
+.peekBody .headline {
+  margin-bottom: 10px;
+}
+
+.peekBody .callout {
+  margin: 0 0 10px;
+}
+
+.peekHeight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.peekHeight .heightRow {
+  flex: 1;
+  min-width: 0;
+  gap: 10px;
+}
+
+.peekLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.peekLabel .spinner {
+  margin-left: 0;
+}
+
+.calloutBtn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+/* ---- Drawing buttons ---- */
+.drawBtns {
+  display: flex;
+  gap: 8px;
+}
+
+.drawBtns .secondary {
+  padding: 8px 12px;
+}
+
+.primary.finish {
+  width: auto;
+  flex: 1;
+}
+
+.primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+  background: var(--color-primary);
+}
+
+
 
 .section {
   padding: 16px 18px;
@@ -167,6 +291,7 @@
 
 .slider {
   flex: 1;
+  min-width: 0;
   accent-color: var(--color-primary);
 }
 
@@ -448,4 +573,16 @@
 .secondary:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* Bigger touch targets, and 16px inputs so iOS doesn't zoom on focus */
+@media (pointer: coarse) {
+  .secondary { padding: 9px 14px; font-size: 0.8rem; }
+  .primary { padding: 12px 14px; }
+  .link { padding: 9px 6px; }
+  .numberBox input,
+  .keyInput,
+  .select { font-size: 16px; }
+  .slider { height: 28px; }
+  .check input { width: 18px; height: 18px; margin-top: 0; }
 }

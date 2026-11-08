@@ -1,10 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import MapView from './components/MapView'
 import SidePanel from './components/SidePanel'
 import AboutDialog from './components/AboutDialog'
 import { analyzeReservoir } from './lib/analysis'
 import { renderFloodOverlay } from './lib/overlay'
 import { sourceById, DEFAULT_SOURCE, loadKeys, saveKeys } from './lib/sources'
+import { useMedia, MOBILE_QUERY, TOUCH_QUERY } from './lib/useMedia'
 import styles from './App.module.css'
 
 const SOURCE_STORE = 'baraj.source'
@@ -42,6 +43,40 @@ export default function App() {
   const [aboutOpen, setAboutOpen] = useState(false)
   const [sourceId, setSourceId] = useState(() => sourceById(readStored(SOURCE_STORE, DEFAULT_SOURCE)).id)
   const [keys, setKeys] = useState(loadKeys)
+  const [sheetOpen, setSheetOpen] = useState(false) // phone bottom sheet expanded
+  const [vertexCount, setVertexCount] = useState(0)
+  const [insets, setInsets] = useState({ left: 0, bottom: 0 }) // map area covered by the panel
+  const mobile = useMedia(MOBILE_QUERY)
+  const touch = useMedia(TOUCH_QUERY)
+  const drawApi = useRef(null)
+  const panelRef = useRef(null)
+  const bodyRef = useRef(null)
+  const panelShown = mobile || !collapsed
+
+  // Track how much of the map the panel covers, so the flood is framed in the visible part
+  // and Leaflet's bottom controls (attribution, scale) sit above the phone sheet
+  useLayoutEffect(() => {
+    const panel = panelRef.current, body = bodyRef.current
+    if (!panelShown || !panel || !body) {
+      setInsets({ left: 0, bottom: 0 })
+      body?.style.setProperty('--sheet-h', '0px')
+      return
+    }
+    const measure = () => {
+      const p = panel.getBoundingClientRect(), b = body.getBoundingClientRect()
+      const next = mobile
+        ? { left: 0, bottom: Math.max(0, Math.round(b.bottom - p.top)) }
+        : { left: Math.max(0, Math.round(p.right - b.left)), bottom: 0 }
+      body.style.setProperty('--sheet-h', `${next.bottom}px`)
+      setInsets(prev => (prev.left === next.left && prev.bottom === next.bottom ? prev : next))
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(panel)
+    ro.observe(body)
+    return () => ro.disconnect()
+  }, [mobile, panelShown])
 
   const source = sourceById(sourceId)
   const sourceKey = source.keyProvider ? keys[source.keyProvider] || '' : ''
@@ -130,6 +165,8 @@ export default function App() {
   const startDrawing = () => {
     clearResults()
     setDam(null)
+    setVertexCount(0)
+    setSheetOpen(false) // free the map for drawing
     setDrawing(true)
   }
 
@@ -172,12 +209,12 @@ export default function App() {
         </div>
 
         <div className={styles['header-right']}>
-          <button className={styles['btn-panel-toggle']} onClick={() => setAboutOpen(true)}>About</button>
+          <button className={`${styles['btn-panel-toggle']} ${styles['btn-about']}`} onClick={() => setAboutOpen(true)}>About</button>
           {(dam || drawing) && (
             <button className={styles['btn-reset']} onClick={reset}>Reset</button>
           )}
           <button
-            className={styles['btn-panel-toggle']}
+            className={`${styles['btn-panel-toggle']} ${styles['desktop-only']}`}
             onClick={() => setCollapsed(c => !c)}
             title={collapsed ? 'Show panel' : 'Hide panel'}
             aria-label={collapsed ? 'Show panel' : 'Hide panel'}
@@ -189,9 +226,17 @@ export default function App() {
 
       <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
 
-      <div className={styles['app-body']}>
-        {!collapsed && (
+      <div className={`${styles['app-body']} ${mobile && sheetOpen ? styles['sheet-open'] : ''}`} ref={bodyRef}>
+        {panelShown && (
           <SidePanel
+            panelRef={panelRef}
+            mobile={mobile}
+            touch={touch}
+            expanded={sheetOpen}
+            onToggleExpanded={() => setSheetOpen(o => !o)}
+            vertexCount={vertexCount}
+            onUndoPoint={() => drawApi.current?.undo()}
+            onFinishDrawing={() => drawApi.current?.finish()}
             dam={dam}
             drawing={drawing}
             height={height}
@@ -228,6 +273,11 @@ export default function App() {
           leak={!!result?.leak}
           layer={layer}
           keys={keys}
+          apiRef={drawApi}
+          onVertexCount={setVertexCount}
+          insets={insets}
+          mobile={mobile}
+          touch={touch}
         />
       </div>
     </div>

@@ -26,6 +26,10 @@
   --transition-normal: 0.35s var(--ease-out-expo);
 }
 
+@media (max-width: 640px) {
+  :root { --header-height: 50px; }
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body, #root {
@@ -166,4 +170,16 @@ html, body, #root {
 
 .leaflet-control-attribution a {
   color: var(--color-primary-light) !important;
+}
+
+/* ---- Keep attribution and scale above the phone bottom sheet ---- */
+.leaflet-bottom {
+  bottom: var(--sheet-h, 0px);
+  transition: bottom 0.25s ease;
+}
+
+/* ---- Touch screens: the panel gives the drawing instructions, and the
+   pointer-following tooltip would only sit in a corner ---- */
+@media (pointer: coarse) {
+  .leaflet-draw-tooltip { display: none !important; }
 }

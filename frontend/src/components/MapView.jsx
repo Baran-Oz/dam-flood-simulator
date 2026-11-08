@@ -8,6 +8,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet-draw'
 import 'leaflet-draw/dist/leaflet.draw.css'
+import '../lib/drawTouchFix'
 import { createBasemap, satelliteProvider } from '../lib/basemaps'
 import styles from './MapView.module.css'
 
@@ -15,6 +16,7 @@ const DAM_COLOR = '#f59e0b'
 
 export default function MapView({
   dam, drawing, onDamDrawn, onDrawCancelled, overlay, upstreamPoint, axis, gridBounds, leak, layer, keys,
+  apiRef, onVertexCount, insets, mobile, touch,
 }) {
   const divRef = useRef(null)
   const mapRef = useRef(null)
@@ -27,8 +29,20 @@ export default function MapView({
   const drawRef = useRef(null)
   const fittedFor = useRef(null)
   const stoppingRef = useRef(false) // true while we disable the draw handler ourselves
-  const cbRef = useRef({ onDamDrawn, onDrawCancelled })
-  cbRef.current = { onDamDrawn, onDrawCancelled }
+  const cbRef = useRef({ onDamDrawn, onDrawCancelled, onVertexCount })
+  cbRef.current = { onDamDrawn, onDrawCancelled, onVertexCount }
+  const insetsRef = useRef(insets)
+  insetsRef.current = insets
+
+  // Let the panel finish the line or remove its last point (handy on touch screens)
+  useEffect(() => {
+    if (!apiRef) return
+    apiRef.current = {
+      finish: () => drawRef.current?.completeShape(),
+      undo: () => drawRef.current?.deleteLastVertex(),
+    }
+    return () => { apiRef.current = null }
+  }, [apiRef])
 
   // ---- init once ----
   useEffect(() => {
@@ -43,7 +57,8 @@ export default function MapView({
       if (coords.length >= 2) cbRef.current.onDamDrawn(coords)
       else cbRef.current.onDrawCancelled()
     })
-    map.on(L.Draw.Event.DRAWSTART, () => { created = false })
+    map.on(L.Draw.Event.DRAWSTART, () => { created = false; cbRef.current.onVertexCount?.(0) })
+    map.on(L.Draw.Event.DRAWVERTEX, e => cbRef.current.onVertexCount?.(e.layers.getLayers().length))
     map.on(L.Draw.Event.DRAWSTOP, () => {
       // DRAWSTOP fires after CREATED; only treat it as a cancel when nothing was made
       if (stoppingRef.current) return
@@ -156,16 +171,25 @@ export default function MapView({
     floodRef.current = L.imageOverlay(overlay.url, overlay.bounds, { opacity: 0.85, interactive: false }).addTo(map)
     if (fittedFor.current !== dam) {
       fittedFor.current = dam
-      map.flyToBounds(L.latLngBounds(overlay.bounds).pad(0.15), { maxZoom: 14, duration: 0.8 })
+      // Fit the flood into the part of the map that the panel doesn't cover
+      const { left = 0, bottom = 0 } = insetsRef.current || {}
+      map.flyToBounds(L.latLngBounds(overlay.bounds).pad(0.1), {
+        maxZoom: 14,
+        duration: 0.8,
+        paddingTopLeft: [left + 16, 16],
+        paddingBottomRight: [16, bottom + 16],
+      })
     }
   }, [overlay, dam])
 
   return (
     <div className={styles['map-wrapper']}>
       <div ref={divRef} className={`${styles['map-container']} ${drawing ? styles.drawing : ''}`} />
-      {drawing && (
+      {drawing && !mobile && (
         <div className={styles['map-hint']}>
-          Click across the valley from one bank to the other · click the last point again to finish · Esc to cancel
+          {touch
+            ? 'Tap across the valley from one bank to the other · tap the last point again to finish'
+            : 'Click across the valley from one bank to the other · click the last point again to finish · Esc to cancel'}
         </div>
       )}
     </div>

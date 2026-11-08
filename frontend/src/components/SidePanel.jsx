@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { polylineLength } from '../lib/geo'
 import DamProfile from './DamProfile'
 import TerrainPicker from './TerrainPicker'
@@ -22,26 +23,206 @@ function fmtVolume(m3) {
 
 const fmtLen = m => (m >= 1000 ? `${fmtNum(m / 1000, 2)} km` : `${fmtNum(m, 0)} m`)
 
-export default function SidePanel({
-  dam, drawing, height, side, tieIn, busy, progress, result, error,
+/**
+ * Settings and results. On desktop a floating panel on the left; on phones a bottom
+ * sheet that shows only the current step ("peek") until it is expanded.
+ */
+export default function SidePanel(props) {
+  const { mobile, expanded, onToggleExpanded, panelRef } = props
+  const peek = mobile && !expanded
+
+  return (
+    <aside
+      ref={panelRef}
+      className={`${styles.panel} ${mobile ? styles.sheet : ''} ${peek ? styles.peek : ''}`}
+      aria-label="Dam settings and results"
+    >
+      {mobile && <SheetHandle expanded={expanded} onToggle={onToggleExpanded} />}
+      {peek ? <PeekContent {...props} /> : <FullContent {...props} />}
+    </aside>
+  )
+}
+
+/** Grab bar of the bottom sheet: tap to toggle, or swipe up / down */
+function SheetHandle({ expanded, onToggle }) {
+  const startY = useRef(null)
+  const swiped = useRef(false)
+  return (
+    <button
+      type="button"
+      className={styles.handle}
+      onPointerDown={e => { startY.current = e.clientY; swiped.current = false }}
+      onPointerUp={e => {
+        if (startY.current === null) return
+        const dy = e.clientY - startY.current
+        startY.current = null
+        if (Math.abs(dy) < 24) return // a tap: handled by onClick
+        swiped.current = true
+        if ((dy < 0) !== expanded) onToggle()
+      }}
+      onClick={() => {
+        if (swiped.current) swiped.current = false
+        else onToggle()
+      }}
+      aria-expanded={expanded}
+    >
+      <span className={styles.grip} aria-hidden="true" />
+      <span className={styles.handleLabel}>{expanded ? 'Show less' : 'Settings & details'}</span>
+    </button>
+  )
+}
+
+function DrawingControls({ touch, vertexCount, onCancelDrawing, onUndoPoint, onFinishDrawing }) {
+  return (
+    <div className={styles.drawBtns}>
+      <button className={styles.secondary} onClick={onUndoPoint} disabled={vertexCount < 2}>Undo point</button>
+      <button className={styles.secondary} onClick={onCancelDrawing}>Cancel</button>
+      <button
+        className={`${styles.primary} ${styles.finish}`}
+        onClick={onFinishDrawing}
+        disabled={vertexCount < 2}
+        title={vertexCount < 2 ? `${touch ? 'Tap' : 'Click'} at least two points first` : undefined}
+      >
+        Finish
+      </button>
+    </div>
+  )
+}
+
+function HeightControl({ dam, height, onHeightChange }) {
+  return (
+    <div className={styles.heightRow}>
+      <input
+        type="range"
+        className={styles.slider}
+        min="1" max="300" step="1"
+        value={Math.min(300, height)}
+        onChange={e => onHeightChange(+e.target.value)}
+        disabled={!dam}
+        aria-label="Dam height slider"
+      />
+      <label className={styles.numberBox}>
+        <input
+          type="number"
+          inputMode="numeric"
+          min="1" max="1000" step="1"
+          value={height}
+          onChange={e => onHeightChange(Math.max(0, +e.target.value))}
+          disabled={!dam}
+          aria-label="Dam height in metres"
+        />
+        <span>m</span>
+      </label>
+    </div>
+  )
+}
+
+function Headline({ result }) {
+  return (
+    <div className={styles.headline}>
+      <Stat label="Flooded area" value={fmtArea(result.area_m2)} big />
+      <Stat label="Water volume" value={fmtVolume(result.volume_m3)} big />
+    </div>
+  )
+}
+
+/** Compact sheet content: only what the current step needs, so the map stays visible */
+function PeekContent({
+  dam, drawing, height, busy, progress, result, error, needsKey, touch, vertexCount,
+  onStartDrawing, onCancelDrawing, onUndoPoint, onFinishDrawing, onHeightChange, onToggleExpanded,
+}) {
+  if (drawing) {
+    return (
+      <div className={styles.peekBody}>
+        <p className={styles.hint}>
+          {touch ? 'Tap' : 'Click'} points across the valley, from one bank to the other and up both slopes.{' '}
+          {vertexCount > 0 && <strong>{vertexCount} {vertexCount === 1 ? 'point' : 'points'}</strong>}
+        </p>
+        <DrawingControls {...{ touch, vertexCount, onCancelDrawing, onUndoPoint, onFinishDrawing }} />
+      </div>
+    )
+  }
+
+  if (!dam) {
+    return (
+      <div className={styles.peekBody}>
+        <p className={styles.hint}>Zoom in to a river valley and draw the dam's axis across it.</p>
+        <button className={styles.primary} onClick={onStartDrawing}>Draw dam axis</button>
+      </div>
+    )
+  }
+
+  const ok = result?.status === 'ok'
+  let summary
+  if (needsKey) {
+    summary = (
+      <button type="button" className={`${styles.callout} ${styles.calloutBtn}`} onClick={onToggleExpanded}>
+        Add an API key for this dataset to run the analysis. <u>Open settings</u>
+      </button>
+    )
+  } else if (error) {
+    summary = <div className={`${styles.callout} ${styles.danger}`}>{error}</div>
+  } else if (result) {
+    const problem = result.leak
+      ? "The dam doesn't seal the valley at this height."
+      : result.status === 'nodata'
+        ? 'No terrain data under the dam axis.'
+        : !ok ? 'No water is held at this height.' : null
+    summary = (
+      <div className={busy ? styles.stale : ''}>
+        {problem ? (
+          <button
+            type="button"
+            className={`${styles.callout} ${styles.calloutBtn} ${result.leak || result.status === 'nodata' ? styles.danger : ''}`}
+            onClick={onToggleExpanded}
+          >
+            {problem} <u>Details</u>
+          </button>
+        ) : (
+          <Headline result={result} />
+        )}
+      </div>
+    )
+  } else if (busy) {
+    summary = <p className={styles.progress}>{progress || 'Starting…'}</p>
+  }
+
+  return (
+    <div className={styles.peekBody}>
+      {summary}
+      <div className={styles.peekHeight}>
+        <span className={styles.peekLabel}>
+          Dam height
+          {busy && <span className={styles.spinner} aria-label="Computing" />}
+        </span>
+        <HeightControl {...{ dam, height, onHeightChange }} />
+      </div>
+    </div>
+  )
+}
+
+function FullContent({
+  dam, drawing, height, side, tieIn, busy, progress, result, error, touch, vertexCount,
   sourceId, keys, needsKey, onSourceChange, onSaveKey, onOpenAbout,
-  onStartDrawing, onCancelDrawing, onHeightChange, onFlipSide, onAutoSide, onTieInChange,
+  onStartDrawing, onCancelDrawing, onUndoPoint, onFinishDrawing, onHeightChange, onFlipSide, onAutoSide, onTieInChange,
 }) {
   const damLength = dam ? polylineLength(dam) : 0
   const ok = result?.status === 'ok'
+  const verb = touch ? 'Tap' : 'Click'
 
   return (
-    <aside className={styles.panel} aria-label="Dam settings and results">
+    <>
       {/* ---------- 1. Dam axis ---------- */}
       <section className={styles.section}>
         <h2 className={styles.heading}><span className={styles.num}>1</span>Dam axis</h2>
         {drawing ? (
           <>
             <p className={styles.hint}>
-              Click points across the valley, from one bank to the other. Carry the line up
-              both slopes, beyond where the water will reach. Click the last point again to finish.
+              {verb} points across the valley, from one bank to the other. Carry the line up
+              both slopes, beyond where the water will reach. {verb} the last point again, or
+              press Finish.
             </p>
-            <button className={styles.secondary} onClick={onCancelDrawing}>Cancel</button>
+            <DrawingControls {...{ touch, vertexCount, onCancelDrawing, onUndoPoint, onFinishDrawing }} />
           </>
         ) : dam ? (
           <div className={styles.row}>
@@ -61,28 +242,7 @@ export default function SidePanel({
       {/* ---------- 2. Height ---------- */}
       <section className={`${styles.section} ${!dam ? styles.disabled : ''}`}>
         <h2 className={styles.heading}><span className={styles.num}>2</span>Dam height</h2>
-        <div className={styles.heightRow}>
-          <input
-            type="range"
-            className={styles.slider}
-            min="1" max="300" step="1"
-            value={Math.min(300, height)}
-            onChange={e => onHeightChange(+e.target.value)}
-            disabled={!dam}
-            aria-label="Dam height slider"
-          />
-          <label className={styles.numberBox}>
-            <input
-              type="number"
-              min="1" max="1000" step="1"
-              value={height}
-              onChange={e => onHeightChange(Math.max(0, +e.target.value))}
-              disabled={!dam}
-              aria-label="Dam height in metres"
-            />
-            <span>m</span>
-          </label>
-        </div>
+        <HeightControl {...{ dam, height, onHeightChange }} />
         <p className={styles.note}>
           Measured from the riverbed (lowest ground on the axis). The reservoir fills to the crest.
         </p>
@@ -115,12 +275,7 @@ export default function SidePanel({
 
           {result && !needsKey && (
             <div className={busy ? styles.stale : ''}>
-              {ok && !result.leak && (
-                <div className={styles.headline}>
-                  <Stat label="Flooded area" value={fmtArea(result.area_m2)} big />
-                  <Stat label="Water volume" value={fmtVolume(result.volume_m3)} big />
-                </div>
-              )}
+              {ok && !result.leak && <Headline result={result} />}
 
               {result.status !== 'nodata' && <dl className={styles.facts}>
                 <Fact k="Crest / water level" v={`${fmtNum(result.crest, 1)} m`} />
@@ -159,7 +314,7 @@ export default function SidePanel({
         <strong>Estimates only, not for engineering decisions.</strong>{' '}
         <button type="button" className={styles.link} onClick={onOpenAbout}>About &amp; method</button>
       </footer>
-    </aside>
+    </>
   )
 }
 
