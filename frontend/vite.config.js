@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react'
 import { securityHeaders } from './security.config.js'
 
 export default defineConfig({
+  // Sub-path the site is served from, e.g. /dam-flood-simulator/ on GitHub Pages (set by CI)
+  base: process.env.BASE_PATH || '/',
   plugins: [react(), securityHeaders()],
   // Pre-bundle the UMD Leaflet libraries so leaflet-draw can find the global L
   optimizeDeps: {
