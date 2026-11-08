@@ -31,10 +31,11 @@ function damBounds(dam, z, pad) {
   }
 }
 
-function expand(b, touches, z) {
+/** Grow the bounds on the touched sides: by half the span, or by just PAD_TILES when `minimal`. */
+function expand(b, touches, z, minimal = false) {
   const max = 2 ** z - 1
-  const gx = Math.max(PAD_TILES, Math.ceil((b.tx1 - b.tx0 + 1) * 0.5))
-  const gy = Math.max(PAD_TILES, Math.ceil((b.ty1 - b.ty0 + 1) * 0.5))
+  const gx = minimal ? PAD_TILES : Math.max(PAD_TILES, Math.ceil((b.tx1 - b.tx0 + 1) * 0.5))
+  const gy = minimal ? PAD_TILES : Math.max(PAD_TILES, Math.ceil((b.ty1 - b.ty0 + 1) * 0.5))
   return {
     tx0: touches.west ? Math.max(0, b.tx0 - gx) : b.tx0,
     tx1: touches.east ? Math.min(max, b.tx1 + gx) : b.tx1,
@@ -129,7 +130,9 @@ export async function analyzeReservoir(params, deps) {
     const touchesEdge = sim.status === 'ok' && !sim.leak && (t.north || t.south || t.west || t.east)
     if (!touchesEdge) return finish(grid, sim, { z, bounds: b }, false)
 
-    const next = expand(b, t, z)
+    let next = expand(b, t, z)
+    // At the coarsest zoom, a big step may not fit while a small one still does
+    if (pixels(next) > PIXEL_BUDGET && z <= MIN_ZOOM) next = expand(b, t, z, true)
     const stuck = sameBounds(next, b) || (pixels(next) > PIXEL_BUDGET && z <= MIN_ZOOM)
     if (stuck) return finish(grid, sim, { z, bounds: b }, true)
     b = next

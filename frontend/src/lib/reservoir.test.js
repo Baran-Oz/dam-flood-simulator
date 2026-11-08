@@ -68,6 +68,18 @@ describe('simulateReservoir', () => {
     expect(Math.floor(flipped.seedIdx / 200)).toBeGreaterThan(150)
   })
 
+  it('finds upstream even when the cell just below the riverbed is high ground', () => {
+    // A 3 × 3 rock right under the riverbed cell (150, 100) on the downstream side.
+    // Starting the side test from that single cell would see only the rock and call it upstream.
+    const grid = valleyGrid()
+    for (let r = 151; r <= 153; r++) for (let c = 99; c <= 101; c++) grid.data[r * 200 + c] = 300
+    const sim = simulateReservoir(grid, damAcross(40, 160), 30)
+    expect(sim.autoSide).toBe(-1) // north
+    expect(Math.floor(sim.seedIdx / 200)).toBeLessThan(150)
+    expect(sim.leak).toBe(false)
+    expect(sim.volume_m3).toBeCloseTo(expected(155).volume, 0)
+  })
+
   it('flags a leak when the dam does not reach high enough ground, and finds the sealing height', () => {
     // Dam ends at columns 80 and 120. To get around an end the water must pass
     // (149, 121) at 146.5 m, so it seals up to a crest of 146.5 m = 21.5 m height.

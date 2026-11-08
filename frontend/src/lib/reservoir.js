@@ -134,29 +134,50 @@ function stepOff(grid, mask, r, c, dir) {
 }
 
 /**
+ * Cells just off one face of the dam: from every dam cell, step along its own
+ * segment's normal (sign +1 or -1) to the first non-dam cell. Using the whole
+ * face, rather than one cell next to the riverbed, means a single odd pixel
+ * (a rock, a bridge pier, a DEM spike) cannot decide the answer.
+ */
+function faceCells(grid, mask, cells, damPx, sign) {
+  const out = new Set()
+  for (const { r, c, seg } of cells) {
+    const dx = damPx[seg + 1][0] - damPx[seg][0]
+    const dy = damPx[seg + 1][1] - damPx[seg][1]
+    const len = Math.hypot(dx, dy) || 1
+    const idx = stepOff(grid, mask, r, c, [(-dy / len) * sign, (dx / len) * sign])
+    if (idx >= 0) out.add(idx)
+  }
+  return out
+}
+
+/**
  * Guess which side of the dam is upstream by following the river. Water released
- * just above the riverbed at the downstream foot runs down the valley and soon
+ * just above the riverbed along the downstream face runs down the valley and soon
  * finds ground lower than the riverbed at the dam. On the upstream side the bed
  * rises, so it never does. Comparing the lowest ground each side reaches is
  * robust to winding gorges, where "straight out from the dam" is meaningless.
  * Returns +1 (along the dam normal) or -1.
  */
-function guessUpstreamSide(grid, mask, r, c, normal, base) {
+function guessUpstreamSide(grid, mask, faces, base) {
   const lowest = sign => {
-    const seed = stepOff(grid, mask, r, c, [normal[0] * sign, normal[1] * sign])
-    return seed < 0 ? -Infinity : lowestReachable(grid, mask, seed, base + 10, 60000)
+    const seeds = [...faces[sign]].filter(i => grid.data[i] < base + 10)
+    return seeds.length ? lowestReachable(grid, mask, seeds, base + 10, 60000) : Infinity
   }
   return lowest(-1) > lowest(1) ? -1 : 1
 }
 
-/** Lowest ground reachable from `seed` through cells below `level`, exploring at most maxCells. */
-function lowestReachable(grid, mask, seed, level, maxCells) {
+/** Lowest ground reachable from the seeds through cells below `level`, exploring at most maxCells. */
+function lowestReachable(grid, mask, seeds, level, maxCells) {
   const { data, width, height } = grid
   const seen = new Uint8Array(width * height)
-  const queue = new Int32Array(maxCells)
-  let head = 0, tail = 0, lowest = data[seed]
-  seen[seed] = 1
-  queue[tail++] = seed
+  const queue = new Int32Array(Math.max(maxCells, seeds.length))
+  let head = 0, tail = 0, lowest = Infinity
+  for (const s of seeds) {
+    if (seen[s]) continue
+    seen[s] = 1
+    queue[tail++] = s
+  }
   while (head < tail) {
     const idx = queue[head++]
     const e = data[idx]
@@ -178,10 +199,11 @@ function lowestReachable(grid, mask, seed, level, maxCells) {
 }
 
 /**
- * 4-connected flood fill from `seed` over non-dam cells with ground < level.
- * Stops early (reachedStop = true) if it reaches `stopIdx`.
+ * 4-connected flood fill from the seeds over non-dam cells with ground < level.
+ * Seeds at or above the level are skipped. If `stop` (a Uint8Array mask) is
+ * given, the fill ends as soon as it reaches a marked cell (reachedStop = true).
  */
-export function floodFill(grid, mask, seed, level, stopIdx = -1, scratch = null) {
+export function floodFill(grid, mask, seeds, level, stop = null, scratch = null) {
   const { data, width, height } = grid
   const n = width * height
   const flood = scratch ? scratch.flood.fill(0) : new Uint8Array(n)
@@ -189,12 +211,15 @@ export function floodFill(grid, mask, seed, level, stopIdx = -1, scratch = null)
   const touches = { north: false, south: false, west: false, east: false }
   let head = 0, tail = 0
 
-  flood[seed] = 1
-  queue[tail++] = seed
+  for (const s of typeof seeds === 'number' ? [seeds] : seeds) {
+    if (flood[s] || mask[s] || !(data[s] < level)) continue
+    flood[s] = 1
+    queue[tail++] = s
+  }
 
   while (head < tail) {
     const idx = queue[head++]
-    if (idx === stopIdx) return { flood, count: tail, touches, reachedStop: true }
+    if (stop && stop[idx]) return { flood, count: tail, touches, reachedStop: true }
     const r = (idx / width) | 0
     const c = idx - r * width
     if (r === 0) touches.north = true
@@ -242,32 +267,43 @@ export function simulateReservoir(grid, damPx, heightM, side = 'auto', opts = {}
   if (deepest < 0) return { status: 'nodata', profile }
   if (opts.base != null) base = opts.base
 
-  const { r, c, seg } = cells[deepest]
-  const dx = damPx[seg + 1][0] - damPx[seg][0]
-  const dy = damPx[seg + 1][1] - damPx[seg][1]
-  const len = Math.hypot(dx, dy) || 1
-  const normal = [-dy / len, dx / len]
-
-  const autoSide = guessUpstreamSide(grid, mask, r, c, normal, base)
-  const upSide = side === 1 || side === -1 ? side : autoSide
-  const seed = stepOff(grid, mask, r, c, [normal[0] * upSide, normal[1] * upSide])
-  const probe = stepOff(grid, mask, r, c, [-normal[0] * upSide, -normal[1] * upSide])
-  const crest = base + heightM
-
-  const common = {
-    base, crest, side: upSide, autoSide, profile,
-    seedIdx: seed, deepestCell: { r, c }, mask,
+  // Cells along each face of the dam. A cell claimed by both faces (at a sharp
+  // bend in the axis) belongs to neither.
+  const faces = { 1: faceCells(grid, mask, cells, damPx, 1), [-1]: faceCells(grid, mask, cells, damPx, -1) }
+  for (const i of [...faces[1]]) {
+    if (faces[-1].has(i)) { faces[1].delete(i); faces[-1].delete(i) }
   }
 
-  if (seed < 0 || !(grid.data[seed] < crest)) {
+  const autoSide = guessUpstreamSide(grid, mask, faces, base)
+  const upSide = side === 1 || side === -1 ? side : autoSide
+  const crest = base + heightM
+  const { data, width, height } = grid
+
+  const seeds = [...faces[upSide]].filter(i => data[i] < crest)
+  const downstream = new Uint8Array(width * height)
+  for (const i of faces[-upSide]) downstream[i] = 1
+
+  // Map marker: the upstream seed nearest the riverbed
+  const { r, c } = cells[deepest]
+  let seedIdx = -1, best = Infinity
+  for (const i of seeds) {
+    const d = (((i / width) | 0) - r) ** 2 + ((i % width) - c) ** 2
+    if (d < best) { best = d; seedIdx = i }
+  }
+
+  const common = { base, crest, side: upSide, autoSide, profile, seedIdx, deepestCell: { r, c }, mask }
+
+  if (!seeds.length) {
     return { ...common, status: 'dry', area_m2: 0, volume_m3: 0, maxDepth: 0 }
   }
 
-  const fill = floodFill(grid, mask, seed, crest)
-  const leak = probe >= 0 && fill.flood[probe] === 1
+  const fill = floodFill(grid, mask, seeds, crest)
+  let leak = false
+  for (const i of faces[-upSide]) {
+    if (fill.flood[i]) { leak = true; break }
+  }
 
   // Area / volume / depth, with per-row cell areas (Mercator scale varies with latitude)
-  const { data, width, height } = grid
   const rowArea = new Float64Array(height)
   for (let rr = 0; rr < height; rr++) {
     rowArea[rr] = metersPerPixel(grid.y0 + rr + 0.5, grid.z) ** 2
@@ -300,16 +336,15 @@ export function simulateReservoir(grid, damPx, heightM, side = 'auto', opts = {}
     maxDepth,
   }
 
-  if (leak) result.maxSealingHeight = maxSealingHeight(grid, mask, seed, probe, base, heightM)
+  if (leak) result.maxSealingHeight = maxSealingHeight(grid, mask, [...faces[upSide]], downstream, base, heightM)
   return result
 }
 
-/** Largest dam height (to 0.25 m) at which water does not reach the downstream foot. */
-function maxSealingHeight(grid, mask, seed, probe, base, hi) {
+/** Largest dam height (to 0.25 m) at which water does not reach the downstream face. */
+function maxSealingHeight(grid, mask, seeds, downstream, base, hi) {
   const n = grid.width * grid.height
   const scratch = { flood: new Uint8Array(n), queue: new Int32Array(n) }
-  const leaks = h =>
-    grid.data[seed] < base + h && floodFill(grid, mask, seed, base + h, probe, scratch).reachedStop
+  const leaks = h => floodFill(grid, mask, seeds, base + h, downstream, scratch).reachedStop
   let lo = 0
   while (hi - lo > 0.25) {
     const mid = (lo + hi) / 2
