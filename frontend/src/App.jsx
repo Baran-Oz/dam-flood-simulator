@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import MapView from './components/MapView'
 import SidePanel from './components/SidePanel'
+import AboutDialog from './components/AboutDialog'
 import { analyzeReservoir } from './lib/analysis'
 import { renderFloodOverlay } from './lib/overlay'
 import { sourceById, DEFAULT_SOURCE, loadKeys, saveKeys } from './lib/sources'
@@ -38,6 +39,7 @@ export default function App() {
   const [error, setError] = useState(null)
   const [layer, setLayer] = useState('topo')
   const [collapsed, setCollapsed] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
   const [sourceId, setSourceId] = useState(() => sourceById(readStored(SOURCE_STORE, DEFAULT_SOURCE)).id)
   const [keys, setKeys] = useState(loadKeys)
 
@@ -170,6 +172,7 @@ export default function App() {
         </div>
 
         <div className={styles['header-right']}>
+          <button className={styles['btn-panel-toggle']} onClick={() => setAboutOpen(true)}>About</button>
           {(dam || drawing) && (
             <button className={styles['btn-reset']} onClick={reset}>Reset</button>
           )}
@@ -183,6 +186,8 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
 
       <div className={styles['app-body']}>
         {!collapsed && (
@@ -198,6 +203,7 @@ export default function App() {
             needsKey={needsKey}
             onSourceChange={changeSource}
             onSaveKey={saveKey}
+            onOpenAbout={() => setAboutOpen(true)}
             busy={busy}
             progress={progress}
             result={result}
@@ -221,6 +227,7 @@ export default function App() {
           gridBounds={result?.edgeLimited ? result.gridBounds : null}
           leak={!!result?.leak}
           layer={layer}
+          keys={keys}
         />
       </div>
     </div>

@@ -8,30 +8,13 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet-draw'
 import 'leaflet-draw/dist/leaflet.draw.css'
+import { createBasemap, satelliteProvider } from '../lib/basemaps'
 import styles from './MapView.module.css'
-
-const BASEMAPS = {
-  street: () =>
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
-      maxZoom: 19,
-    }),
-  topo: () =>
-    L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-      attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>, SRTM | © <a href="https://opentopomap.org">OpenTopoMap</a>',
-      maxZoom: 17,
-    }),
-  satellite: () =>
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: 'Imagery © Esri',
-      maxZoom: 19,
-    }),
-}
 
 const DAM_COLOR = '#f59e0b'
 
 export default function MapView({
-  dam, drawing, onDamDrawn, onDrawCancelled, overlay, upstreamPoint, axis, gridBounds, leak, layer,
+  dam, drawing, onDamDrawn, onDrawCancelled, overlay, upstreamPoint, axis, gridBounds, leak, layer, keys,
 }) {
   const divRef = useRef(null)
   const mapRef = useRef(null)
@@ -68,17 +51,27 @@ export default function MapView({
     })
 
     mapRef.current = map
-    if (import.meta.env.DEV) window.__damMap = map // handle for scripted browser checks
+    // Handle for scripted browser checks (dev server, or a test build with VITE_EXPOSE_MAP=1)
+    if (import.meta.env.DEV || import.meta.env.VITE_EXPOSE_MAP) window.__damMap = map
     return () => { map.remove(); mapRef.current = null }
   }, [])
 
-  // ---- basemap ----
+  // ---- basemap (satellite imagery depends on which keys are saved) ----
+  const satKey = layer === 'satellite' ? satelliteProvider(keys) : ''
+  const satToken = satKey === 'maptiler' ? keys?.maptiler : satKey === 'mapbox' ? keys?.mapbox : ''
   useEffect(() => {
     const map = mapRef.current
-    if (baseRef.current) baseRef.current.remove()
-    baseRef.current = (BASEMAPS[layer] || BASEMAPS.street)().addTo(map)
-    baseRef.current.bringToBack()
-  }, [layer])
+    let cancelled = false
+    createBasemap(layer, keys)
+      .then(base => {
+        if (cancelled || !mapRef.current) return
+        if (baseRef.current) baseRef.current.remove()
+        baseRef.current = base.addTo(map)
+        base.bringToBack?.()
+      })
+      .catch(err => console.error('Basemap failed to load', err))
+    return () => { cancelled = true }
+  }, [layer, satKey, satToken]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- drawing mode ----
   useEffect(() => {

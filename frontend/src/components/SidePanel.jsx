@@ -24,7 +24,7 @@ const fmtLen = m => (m >= 1000 ? `${fmtNum(m / 1000, 2)} km` : `${fmtNum(m, 0)} 
 
 export default function SidePanel({
   dam, drawing, height, side, tieIn, busy, progress, result, error,
-  sourceId, keys, needsKey, onSourceChange, onSaveKey,
+  sourceId, keys, needsKey, onSourceChange, onSaveKey, onOpenAbout,
   onStartDrawing, onCancelDrawing, onHeightChange, onFlipSide, onAutoSide, onTieInChange,
 }) {
   const damLength = dam ? polylineLength(dam) : 0
@@ -155,7 +155,9 @@ export default function SidePanel({
 
       <footer className={styles.footer}>
         Terrain: {sourceById(sourceId).attribution}. Elevations are of the surface at the time of
-        survey, so lakes that already existed then count as land. Results are a first-order estimate.
+        survey, so lakes that already existed then count as land.{' '}
+        <strong>Estimates only, not for engineering decisions.</strong>{' '}
+        <button type="button" className={styles.link} onClick={onOpenAbout}>About &amp; method</button>
       </footer>
     </aside>
   )
